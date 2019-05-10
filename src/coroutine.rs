@@ -142,7 +142,8 @@ impl Coroutine {
     /// ```
     pub fn new() -> Self {
         Coroutine {
-            stack_size: Stack::default_size(),
+            // 4mb stacks but it's just virtual memory so no perf impact
+            stack_size: Stack::default_size() * 1_000,
             cleanup_strategy: CleanupStrategy::CleanupAlways,
         }
     }

@@ -19,7 +19,7 @@ extern crate futures;
 extern crate futures_cpupool;
 #[macro_use]
 extern crate lazy_static;
-extern crate may;
+// extern crate may;
 extern crate net2;
 extern crate num_cpus;
 extern crate test;
@@ -38,8 +38,8 @@ use corona::prelude::*;
 use futures::prelude::*;
 use futures::{stream, Future, Stream};
 use futures_cpupool::CpuPool;
-use may::coroutine;
-use may::net::TcpListener as MayTcpListener;
+// use may::coroutine;
+// use may::net::TcpListener as MayTcpListener;
 use net2::TcpBuilder;
 use test::Bencher;
 use tokio::io;
@@ -336,159 +336,4 @@ fn futures_cpupool_many(b: &mut Bencher) {
 #[bench]
 fn futures_cpupool_cpus(b: &mut Bencher) {
     bench(b, num_cpus::get(), run_futures_cpupool);
-}
-
-// fn gen_async(listener: TcpListener) -> impl Future<Item = (), Error = ()> {
-//     let incoming = TokioTcpListener::from_std(listener, &Handle::default())
-//         .unwrap()
-//         .incoming();
-//     let main = async_block! {
-//         #[async]
-//         for mut connection in incoming {
-//             let client = async_block! {
-//                     let mut buf = vec![0u8; BUF_SIZE];
-//                     for _ in 0..*EXCHANGES {
-//                         let (c, b) = await!(io::read_exact(connection, buf))?;
-//                         let (c, b) = await!(io::write_all(c, b))?;
-//                         connection = c;
-//                         buf = b;
-//                     }
-//                     Ok(())
-//                 }
-//                 .map(|_| ())
-//                 .map_err(|e: std::io::Error| panic!(e));
-//             tokio::spawn(client);
-//         }
-//         Ok::<(), std::io::Error>(())
-//     }
-//     .map_err(|e| panic!("{}", e));
-//     main
-// }
-
-// fn run_async(listener: TcpListener) {
-//     current_thread::block_on_all(gen_async(listener)).unwrap();
-// }
-
-// fn run_async_workstealing(listener: TcpListener) {
-//     tokio::run(gen_async(listener));
-// }
-
-// /// With the futures-async magic
-// #[bench]
-// fn async(b: &mut Bencher) {
-//     bench(b, 1, run_async);
-// }
-
-// #[bench]
-// fn async_many(b: &mut Bencher) {
-//     bench(b, *SERVER_THREADS, run_async);
-// }
-
-// #[bench]
-// fn async_cpus(b: &mut Bencher) {
-//     bench(b, num_cpus::get(), run_async);
-// }
-
-// #[bench]
-// fn async_workstealing(b: &mut Bencher) {
-//     bench(b, 1, run_async_workstealing);
-// }
-
-// fn run_async_cpupool(listener: TcpListener) {
-//     let incoming = TokioTcpListener::from_std(listener, &Handle::default())
-//         .unwrap()
-//         .incoming();
-//     let main = async_block! {
-//         #[async]
-//         for mut connection in incoming {
-//             let client = async_block! {
-//                     let mut buf = vec![0u8; BUF_SIZE];
-//                     for _ in 0..*EXCHANGES {
-//                         let (c, b) = await!(io::read_exact(connection, buf))?;
-//                         let (c, b) = await!(io::write_all(c, b))?;
-//                         connection = c;
-//                         buf = b;
-//                     }
-//                     Ok(())
-//                 }
-//                 .map(|_| ())
-//                 .map_err(|e: std::io::Error| panic!(e));
-//             let offloaded = POOL.spawn(client)
-//                 .map(|_| ())
-//                 .map_err(|e: std::io::Error| panic!(e));
-//             tokio::spawn(offloaded);
-//         }
-//         Ok::<_, std::io::Error>(())
-//     };
-//     current_thread::block_on_all(main).unwrap();
-// }
-
-// #[bench]
-// fn async_cpupool(b: &mut Bencher) {
-//     bench(b, 1, run_async_cpupool);
-// }
-
-// #[bench]
-// fn async_cpupool_many(b: &mut Bencher) {
-//     bench(b, *SERVER_THREADS, run_async_cpupool);
-// }
-
-// #[bench]
-// fn async_cpupool_cpus(b: &mut Bencher) {
-//     bench(b, num_cpus::get(), run_async_cpupool);
-// }
-
-/*
- * Note about the unsafety here.
- *
- * The may library uses N:M threading with work stealing of coroutine threads. This completely
- * disregards all the compile-time thread safety guarantees of Rust and turns Rust into a C++ with
- * better package management.
- *
- * The problem is, Rust doesn't check if the stack contains something that isn't Send. And moving
- * the stack to a different OS thread sends all these potentially non-Send things to a different
- * thread, basically insuring undefined behaviour.
- *
- * This is OK in our case ‒ we do basically nothing here and we have no non-Send data on the
- * thread. But it's hard to ensure in the general case (you'd have to check the stacks of all the
- * dependencies and you'd have to make sure none of your dependencies uses TLS). Still, the check
- * lies with the user of the library.
- */
-fn run_may(listener: TcpListener) {
-    // May can't change config later on… so all tests need to have the same config. Let's use the
-    // same thing (number of real CPUs) as with the futures-cpupool, to have some illusion of
-    // fairness.
-    may::config()
-        .set_workers(num_cpus::get())
-        .set_io_workers(num_cpus::get());
-    // May doesn't seem to support direct conversion
-    let raw_fd = listener.into_raw_fd();
-    let listener = unsafe { MayTcpListener::from_raw_fd(raw_fd) };
-    while let Ok((mut connection, _address)) = listener.accept() {
-        unsafe {
-            coroutine::spawn(move || {
-                let mut buf = [0u8; BUF_SIZE];
-                for _ in 0..*EXCHANGES {
-                    connection.read_exact(&mut buf[..]).unwrap();
-                    connection.write_all(&buf[..]).unwrap();
-                }
-            })
-        };
-    }
-}
-
-/// May
-#[bench]
-fn may(b: &mut Bencher) {
-    bench(b, 1, run_may);
-}
-
-#[bench]
-fn may_many(b: &mut Bencher) {
-    bench(b, *SERVER_THREADS, run_may);
-}
-
-#[bench]
-fn may_cpus(b: &mut Bencher) {
-    bench(b, num_cpus::get(), run_may);
 }
