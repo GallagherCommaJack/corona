@@ -15,7 +15,7 @@
 //! The `*_many` variants run the listener in multiple independent threads.
 
 extern crate corona;
-extern crate futures_await as futures;
+extern crate futures;
 extern crate futures_cpupool;
 #[macro_use]
 extern crate lazy_static;
@@ -27,25 +27,25 @@ extern crate tokio;
 
 use std::env;
 use std::io::{Read, Write};
-use std::net::{TcpStream, TcpListener, SocketAddr};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::os::unix::io::{FromRawFd, IntoRawFd};
 use std::sync::mpsc;
 use std::thread;
 
 use corona::io::BlockingWrapper;
 use corona::prelude::*;
-use futures::{stream, Future, Stream};
-use futures::prelude::await;
+// use futures::prelude::await;
 use futures::prelude::*;
+use futures::{stream, Future, Stream};
 use futures_cpupool::CpuPool;
 use may::coroutine;
 use may::net::TcpListener as MayTcpListener;
 use net2::TcpBuilder;
-use tokio::runtime::current_thread;
+use test::Bencher;
+use tokio::io;
 use tokio::net::TcpListener as TokioTcpListener;
 use tokio::reactor::Handle;
-use tokio::io;
-use test::Bencher;
+use tokio::runtime::current_thread;
 
 const BUF_SIZE: usize = 512;
 
@@ -81,10 +81,8 @@ lazy_static! {
 
 /// The client side
 fn batter(addr: SocketAddr) {
-    let mut streams = (0..*PARALLEL / *CLIENT_THREADS).map(|_| {
-            TcpStream::connect(&addr)
-                .unwrap()
-        })
+    let mut streams = (0..*PARALLEL / *CLIENT_THREADS)
+        .map(|_| TcpStream::connect(&addr).unwrap())
         .collect::<Vec<_>>();
     let input = [1u8; BUF_SIZE];
     let mut output = [0u8; BUF_SIZE];
@@ -145,25 +143,27 @@ fn bench(b: &mut Bencher, paral: usize, body: fn(TcpListener)) {
 }
 
 fn run_corona(listener: TcpListener) {
-    Coroutine::new().run(move || {
-        let incoming = TokioTcpListener::from_std(listener, &Handle::default())
-            .unwrap()
-            .incoming()
-            .iter_ok();
-        for mut connection in incoming {
-            corona::spawn(move || {
-                let mut buf = [0u8; BUF_SIZE];
-                for _ in 0..*EXCHANGES {
-                    io::read_exact(&mut connection, &mut buf[..])
-                        .coro_wait()
-                        .unwrap();
-                    io::write_all(&mut connection, &buf[..])
-                        .coro_wait()
-                        .unwrap();
-                }
-            });
-        }
-    }).unwrap();
+    Coroutine::new()
+        .run(move || {
+            let incoming = TokioTcpListener::from_std(listener, &Handle::default())
+                .unwrap()
+                .incoming()
+                .iter_ok();
+            for mut connection in incoming {
+                corona::spawn(move || {
+                    let mut buf = [0u8; BUF_SIZE];
+                    for _ in 0..*EXCHANGES {
+                        io::read_exact(&mut connection, &mut buf[..])
+                            .coro_wait()
+                            .unwrap();
+                        io::write_all(&mut connection, &buf[..])
+                            .coro_wait()
+                            .unwrap();
+                    }
+                });
+            }
+        })
+        .unwrap();
 }
 
 /// Our own corona.
@@ -183,22 +183,24 @@ fn corona_cpus(b: &mut Bencher) {
 }
 
 fn run_corona_wrapper(listener: TcpListener) {
-    Coroutine::new().run(move || {
-        let incoming = TokioTcpListener::from_std(listener, &Handle::default())
-            .unwrap()
-            .incoming()
-            .iter_ok();
-        for connection in incoming {
-            corona::spawn(move || {
-                let mut buf = [0u8; BUF_SIZE];
-                let mut connection = BlockingWrapper::new(connection);
-                for _ in 0..*EXCHANGES {
-                    connection.read_exact(&mut buf[..]).unwrap();
-                    connection.write_all(&buf[..]).unwrap();
-                }
-            });
-        }
-    }).unwrap();
+    Coroutine::new()
+        .run(move || {
+            let incoming = TokioTcpListener::from_std(listener, &Handle::default())
+                .unwrap()
+                .incoming()
+                .iter_ok();
+            for connection in incoming {
+                corona::spawn(move || {
+                    let mut buf = [0u8; BUF_SIZE];
+                    let mut connection = BlockingWrapper::new(connection);
+                    for _ in 0..*EXCHANGES {
+                        connection.read_exact(&mut buf[..]).unwrap();
+                        connection.write_all(&buf[..]).unwrap();
+                    }
+                });
+            }
+        })
+        .unwrap();
 }
 
 /// Corona, but with the blocking wrapper
@@ -216,7 +218,6 @@ fn corona_blocking_wrapper_many(b: &mut Bencher) {
 fn corona_blocking_wrapper_cpus(b: &mut Bencher) {
     bench(b, num_cpus::get(), run_corona_wrapper);
 }
-
 
 fn run_threads(listener: TcpListener) {
     while let Ok((mut connection, _address)) = listener.accept() {
@@ -312,7 +313,8 @@ fn run_futures_cpupool(listener: TcpListener) {
                         .and_then(|(connection, buf)| io::write_all(connection, buf))
                 })
                 .map(|_| ());
-            let offloaded = POOL.spawn(perform)
+            let offloaded = POOL
+                .spawn(perform)
                 .map(|_| ())
                 .map_err(|e: std::io::Error| panic!("{}", e));
             tokio::spawn(offloaded)
@@ -336,106 +338,105 @@ fn futures_cpupool_cpus(b: &mut Bencher) {
     bench(b, num_cpus::get(), run_futures_cpupool);
 }
 
-fn gen_async(listener: TcpListener) -> impl Future<Item = (), Error = ()> {
-    let incoming = TokioTcpListener::from_std(listener, &Handle::default())
-        .unwrap()
-        .incoming();
-    let main = async_block! {
-        #[async]
-        for mut connection in incoming {
-            let client = async_block! {
-                    let mut buf = vec![0u8; BUF_SIZE];
-                    for _ in 0..*EXCHANGES {
-                        let (c, b) = await!(io::read_exact(connection, buf))?;
-                        let (c, b) = await!(io::write_all(c, b))?;
-                        connection = c;
-                        buf = b;
-                    }
-                    Ok(())
-                }
-                .map(|_| ())
-                .map_err(|e: std::io::Error| panic!(e));
-            tokio::spawn(client);
-        }
-        Ok::<(), std::io::Error>(())
-    }
-    .map_err(|e| panic!("{}", e));
-    main
-}
+// fn gen_async(listener: TcpListener) -> impl Future<Item = (), Error = ()> {
+//     let incoming = TokioTcpListener::from_std(listener, &Handle::default())
+//         .unwrap()
+//         .incoming();
+//     let main = async_block! {
+//         #[async]
+//         for mut connection in incoming {
+//             let client = async_block! {
+//                     let mut buf = vec![0u8; BUF_SIZE];
+//                     for _ in 0..*EXCHANGES {
+//                         let (c, b) = await!(io::read_exact(connection, buf))?;
+//                         let (c, b) = await!(io::write_all(c, b))?;
+//                         connection = c;
+//                         buf = b;
+//                     }
+//                     Ok(())
+//                 }
+//                 .map(|_| ())
+//                 .map_err(|e: std::io::Error| panic!(e));
+//             tokio::spawn(client);
+//         }
+//         Ok::<(), std::io::Error>(())
+//     }
+//     .map_err(|e| panic!("{}", e));
+//     main
+// }
 
-fn run_async(listener: TcpListener) {
-    current_thread::block_on_all(gen_async(listener)).unwrap();
-}
+// fn run_async(listener: TcpListener) {
+//     current_thread::block_on_all(gen_async(listener)).unwrap();
+// }
 
-fn run_async_workstealing(listener: TcpListener) {
-    tokio::run(gen_async(listener));
-}
+// fn run_async_workstealing(listener: TcpListener) {
+//     tokio::run(gen_async(listener));
+// }
 
-/// With the futures-async magic
-#[bench]
-fn async(b: &mut Bencher) {
-    bench(b, 1, run_async);
-}
+// /// With the futures-async magic
+// #[bench]
+// fn async(b: &mut Bencher) {
+//     bench(b, 1, run_async);
+// }
 
-#[bench]
-fn async_many(b: &mut Bencher) {
-    bench(b, *SERVER_THREADS, run_async);
-}
+// #[bench]
+// fn async_many(b: &mut Bencher) {
+//     bench(b, *SERVER_THREADS, run_async);
+// }
 
-#[bench]
-fn async_cpus(b: &mut Bencher) {
-    bench(b, num_cpus::get(), run_async);
-}
+// #[bench]
+// fn async_cpus(b: &mut Bencher) {
+//     bench(b, num_cpus::get(), run_async);
+// }
 
-#[bench]
-fn async_workstealing(b: &mut Bencher) {
-    bench(b, 1, run_async_workstealing);
-}
+// #[bench]
+// fn async_workstealing(b: &mut Bencher) {
+//     bench(b, 1, run_async_workstealing);
+// }
 
-fn run_async_cpupool(listener: TcpListener) {
-    let incoming = TokioTcpListener::from_std(listener, &Handle::default())
-        .unwrap()
-        .incoming();
-    let main = async_block! {
-        #[async]
-        for mut connection in incoming {
-            let client = async_block! {
-                    let mut buf = vec![0u8; BUF_SIZE];
-                    for _ in 0..*EXCHANGES {
-                        let (c, b) = await!(io::read_exact(connection, buf))?;
-                        let (c, b) = await!(io::write_all(c, b))?;
-                        connection = c;
-                        buf = b;
-                    }
-                    Ok(())
-                }
-                .map(|_| ())
-                .map_err(|e: std::io::Error| panic!(e));
-            let offloaded = POOL.spawn(client)
-                .map(|_| ())
-                .map_err(|e: std::io::Error| panic!(e));
-            tokio::spawn(offloaded);
-        }
-        Ok::<_, std::io::Error>(())
-    };
-    current_thread::block_on_all(main).unwrap();
-}
+// fn run_async_cpupool(listener: TcpListener) {
+//     let incoming = TokioTcpListener::from_std(listener, &Handle::default())
+//         .unwrap()
+//         .incoming();
+//     let main = async_block! {
+//         #[async]
+//         for mut connection in incoming {
+//             let client = async_block! {
+//                     let mut buf = vec![0u8; BUF_SIZE];
+//                     for _ in 0..*EXCHANGES {
+//                         let (c, b) = await!(io::read_exact(connection, buf))?;
+//                         let (c, b) = await!(io::write_all(c, b))?;
+//                         connection = c;
+//                         buf = b;
+//                     }
+//                     Ok(())
+//                 }
+//                 .map(|_| ())
+//                 .map_err(|e: std::io::Error| panic!(e));
+//             let offloaded = POOL.spawn(client)
+//                 .map(|_| ())
+//                 .map_err(|e: std::io::Error| panic!(e));
+//             tokio::spawn(offloaded);
+//         }
+//         Ok::<_, std::io::Error>(())
+//     };
+//     current_thread::block_on_all(main).unwrap();
+// }
 
-/// Async, but with cpu pool
-#[bench]
-fn async_cpupool(b: &mut Bencher) {
-    bench(b, 1, run_async_cpupool);
-}
+// #[bench]
+// fn async_cpupool(b: &mut Bencher) {
+//     bench(b, 1, run_async_cpupool);
+// }
 
-#[bench]
-fn async_cpupool_many(b: &mut Bencher) {
-    bench(b, *SERVER_THREADS, run_async_cpupool);
-}
+// #[bench]
+// fn async_cpupool_many(b: &mut Bencher) {
+//     bench(b, *SERVER_THREADS, run_async_cpupool);
+// }
 
-#[bench]
-fn async_cpupool_cpus(b: &mut Bencher) {
-    bench(b, num_cpus::get(), run_async_cpupool);
-}
+// #[bench]
+// fn async_cpupool_cpus(b: &mut Bencher) {
+//     bench(b, num_cpus::get(), run_async_cpupool);
+// }
 
 /*
  * Note about the unsafety here.
