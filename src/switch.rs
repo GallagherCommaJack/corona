@@ -236,20 +236,21 @@ impl Switch {
                 if let Some(panic) = panic {
                     panic::resume_unwind(panic);
                 }
-            },
+            }
             WaitFuture { mut task } => {
                 task.context = Some(context);
                 // Ignore the result. In case an error happens, the task gets dropped and it can
                 // already handle that.
                 let _ = TaskExecutor::current().spawn_local(Box::new(task));
-            },
+            }
             _ => unreachable!("Invalid switch instruction when switching out"),
         }
     }
     /// Creates a new coroutine and runs it.
     pub(crate) fn run_new_coroutine(stack_size: usize, task: BoxedTask) -> Result<(), StackError> {
         let stack = stack_cache::get(stack_size)?;
-        assert_eq!(stack.len(), stack_size);
+        assert!(stack.len() >= stack_size);
+        // assert_eq!(stack.len(), stack_size, "\nstack has wrong length");
         // The `Context::new` is unsafe only because we have to promise not to delete the stack
         // prematurely, while the coroutine is still alive. We ensure that by giving the ownership
         // of the stack to the coroutine and it gives it up only once it is ready to terminate.

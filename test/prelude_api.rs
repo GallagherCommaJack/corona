@@ -95,3 +95,10 @@ fn extract() {
     let mut s = stream::once::<_, ()>(Ok(42));
     cor.cor_ft(move || s.coro_next().unwrap().unwrap());
 }
+
+/// Setting the stack size
+#[test]
+fn stack() {
+    let mut cor = Cor::new();
+    cor.coroutine.stack_size(10_000).run(|| {}).unwrap()
+}
