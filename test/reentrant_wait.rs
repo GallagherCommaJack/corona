@@ -37,8 +37,8 @@ impl Future for ReentrantPoll {
 fn directly_reentrant() {
     current_thread::block_on_all(future::lazy(|| {
         Coroutine::new()
-            .spawn_catch_panic(|| {
-                ReentrantPoll::default().coro_wait()
-            }).unwrap()
-    })).unwrap_err(); // It is expected the coroutine panics
+            .spawn_catch_panic(|| ReentrantPoll::default().coro_wait())
+            .unwrap()
+    }))
+    .unwrap_err(); // It is expected the coroutine panics
 }

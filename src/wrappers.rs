@@ -10,8 +10,8 @@ use std::panic;
 
 use futures::{Async, AsyncSink, Future, Poll, Sink, Stream};
 
-use prelude::CoroutineFuture;
 use errors::Dropped;
+use prelude::CoroutineFuture;
 
 /// An iterator returned from
 /// [`CoroutineStream::iter_cleanup`](../prelude/trait.CoroutineStream.html#method.iter_cleanup).
@@ -80,10 +80,7 @@ impl<I> OkIterator<I> {
 impl<I, E, S: Stream<Item = I, Error = E>> Iterator for OkIterator<CleanupIterator<S>> {
     type Item = I;
     fn next(&mut self) -> Option<I> {
-        self.0
-            .next()
-            .map(drop_panic)
-            .and_then(Result::ok)
+        self.0.next().map(drop_panic).and_then(Result::ok)
     }
 }
 
@@ -109,9 +106,7 @@ impl<I> ResultIterator<I> {
 impl<I, E, S: Stream<Item = I, Error = E>> Iterator for ResultIterator<CleanupIterator<S>> {
     type Item = Result<I, E>;
     fn next(&mut self) -> Option<Result<I, E>> {
-        self.0
-            .next()
-            .map(drop_panic)
+        self.0.next().map(drop_panic)
     }
 }
 
@@ -192,7 +187,7 @@ where
                     // This item doesn't fit. Hold onto it until we are called again.
                     self.value = Some(returned);
                     return Ok(Async::NotReady);
-                },
+                }
                 Ok(AsyncSink::Ready) => (), // Accepted, try next one.
             }
         }
@@ -237,7 +232,7 @@ mod tests {
             sender_fut.wait().unwrap();
         }
         drop(sender); // EOF the channel
-        // The data is there.
+                      // The data is there.
         let received = receiver.wait().collect::<Result<Vec<_>, _>>().unwrap();
         assert_eq!(data, received);
     }
@@ -258,14 +253,15 @@ mod tests {
             let receiving_fut = Coroutine::with_defaults(move || {
                 let mut result = Vec::new();
                 Coroutine::wait(receiver.for_each(|val| {
-                        result.push(val);
-                        Ok(())
-                    }))
-                    .unwrap()
-                    .unwrap();
+                    result.push(val);
+                    Ok(())
+                }))
+                .unwrap()
+                .unwrap();
                 assert_eq!(vec![1, 2, 3], result);
             });
             receiving_fut.join(sending_fut)
-        })).unwrap();
+        }))
+        .unwrap();
     }
 }

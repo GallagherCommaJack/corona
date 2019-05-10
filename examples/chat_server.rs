@@ -28,15 +28,15 @@ use std::panic::AssertUnwindSafe;
 use std::rc::Rc;
 
 use bytes::BytesMut;
-use corona::Coroutine;
 use corona::io::BlockingWrapper;
 use corona::prelude::*;
 use corona::wrappers::SinkSender;
+use corona::Coroutine;
+use futures::unsync::mpsc::{self, Receiver, Sender};
 use futures::{future, Future};
-use futures::unsync::mpsc::{self, Sender, Receiver};
-use tokio::net::{TcpListener, TcpStream};
-use tokio::io::{AsyncRead, WriteHalf};
 use tokio::codec::{Encoder, FramedWrite};
+use tokio::io::{AsyncRead, WriteHalf};
+use tokio::net::{TcpListener, TcpStream};
 
 /// Encoder turning strings into lines.
 ///
@@ -58,27 +58,27 @@ impl Encoder for LineEncoder {
 type Client = FramedWrite<WriteHalf<TcpStream>, LineEncoder>;
 type Clients = Rc<RefCell<Vec<Client>>>;
 
-fn handle_connection(connection: TcpStream,
-                     clients: &Clients,
-                     mut msgs: Sender<String>)
-{
+fn handle_connection(connection: TcpStream, clients: &Clients, mut msgs: Sender<String>) {
     let (input, output) = connection.split();
     let writer = FramedWrite::new(output, LineEncoder);
     clients.borrow_mut().push(writer);
     let input = BufReader::new(BlockingWrapper::new(input));
-    Coroutine::from_thread_local().spawn_catch_panic(AssertUnwindSafe(move || {
-        // If there's an error, kill the current coroutine. That one is not waited on and the
-        // panic won't propagate. Logging it might be cleaner, but this demonstrates how the
-        // coroutines act.
-        for line in input.lines() {
-            let line = line.expect("Broken line on input");
-            // Pass each line to the broadcaster so it sends it to everyone.
-            // Send it back (the coroutine will yield until the data is written). May block on
-            // being full for a while, then we don't accept more messages.
-            msgs.coro_send(line).expect("The broadcaster suddenly disappeared");
-        }
-        eprintln!("A connection terminated");
-    })).expect("Wrong stack size");
+    Coroutine::from_thread_local()
+        .spawn_catch_panic(AssertUnwindSafe(move || {
+            // If there's an error, kill the current coroutine. That one is not waited on and the
+            // panic won't propagate. Logging it might be cleaner, but this demonstrates how the
+            // coroutines act.
+            for line in input.lines() {
+                let line = line.expect("Broken line on input");
+                // Pass each line to the broadcaster so it sends it to everyone.
+                // Send it back (the coroutine will yield until the data is written). May block on
+                // being full for a while, then we don't accept more messages.
+                msgs.coro_send(line)
+                    .expect("The broadcaster suddenly disappeared");
+            }
+            eprintln!("A connection terminated");
+        }))
+        .expect("Wrong stack size");
 }
 
 fn broadcaster(msgs: Receiver<String>, clients: &Clients) {
@@ -86,14 +86,16 @@ fn broadcaster(msgs: Receiver<String>, clients: &Clients) {
     // the future, since someone else might try to add more at the same time, which would panic.
     let mut extracted = Vec::new();
     for msg in msgs.iter_ok() {
-        { // Steal the clients and return the borrow
+        {
+            // Steal the clients and return the borrow
             let mut borrowed = clients.borrow_mut();
             extracted.extend(borrowed.drain(..));
         }
         let broken_idxs = {
             let msg = Rc::new(msg);
             // Schedule sending of the message to everyone in parallel
-            let all_sent = extracted.iter_mut()
+            let all_sent = extracted
+                .iter_mut()
                 .map(|client| SinkSender::new(client, iter::once(Rc::clone(&msg))))
                 // Turn failures into falses, so it plays nice with collect below.
                 .map(|send_future| send_future.then(|res| Ok::<_, IoError>(res.is_ok())));
@@ -103,11 +105,7 @@ fn broadcaster(msgs: Receiver<String>, clients: &Clients) {
                 // Take only the indices of things that failed to send.
                 .into_iter()
                 .enumerate()
-                .filter_map(|(idx, success)| if success {
-                        None
-                    } else {
-                        Some(idx)
-                    })
+                .filter_map(|(idx, success)| if success { None } else { Some(idx) })
                 .collect::<Vec<_>>()
         };
         // Remove the failing ones. We go from the back, since swap_remove reorders the tail.
@@ -126,7 +124,7 @@ fn acceptor(clients: &Clients, sender: &Sender<String>) {
             Ok(connection) => {
                 eprintln!("Received a connection");
                 handle_connection(connection, clients, sender.clone());
-            },
+            }
             // FIXME: Are all the errors recoverable?
             Err(e) => eprintln!("An error accepting a connection: {}", e),
         }
@@ -134,11 +132,14 @@ fn acceptor(clients: &Clients, sender: &Sender<String>) {
 }
 
 fn main() {
-    Coroutine::new().stack_size(32_768).run(|| {
-        let (sender, receiver) = mpsc::channel(100);
-        let clients = Clients::default();
-        let clients_rc = Rc::clone(&clients);
-        corona::spawn(move || broadcaster(receiver, &clients_rc));
-        acceptor(&clients, &sender);
-    }).expect("Wrong stack size");
+    Coroutine::new()
+        .stack_size(32_768)
+        .run(|| {
+            let (sender, receiver) = mpsc::channel(100);
+            let clients = Clients::default();
+            let clients_rc = Rc::clone(&clients);
+            corona::spawn(move || broadcaster(receiver, &clients_rc));
+            acceptor(&clients, &sender);
+        })
+        .expect("Wrong stack size");
 }

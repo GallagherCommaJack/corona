@@ -273,15 +273,15 @@ extern crate tokio_current_thread;
 #[cfg(feature = "blocking-wrappers")]
 extern crate tokio_io;
 
-#[cfg(feature = "blocking-wrappers")]
-pub mod io;
 pub mod coroutine;
 pub mod errors;
+#[cfg(feature = "blocking-wrappers")]
+pub mod io;
 pub mod prelude;
 pub mod wrappers;
 
 mod stack_cache;
 mod switch;
 
-pub use errors::{Dropped, TaskFailed};
 pub use coroutine::{spawn, Coroutine, CoroutineResult};
+pub use errors::{Dropped, TaskFailed};

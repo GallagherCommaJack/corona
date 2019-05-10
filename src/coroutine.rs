@@ -4,10 +4,10 @@ use std::any::Any;
 use std::cell::RefCell;
 use std::panic::{self, AssertUnwindSafe, UnwindSafe};
 
+use context::stack::{ProtectedFixedSizeStack, Stack};
 use context::Context;
-use context::stack::{Stack, ProtectedFixedSizeStack};
-use futures::{Async, Future, Poll};
 use futures::unsync::oneshot::{self, Receiver};
+use futures::{Async, Future, Poll};
 
 use errors::{Dropped, StackError, TaskFailed};
 use switch::{Switch, WaitTask};
@@ -216,8 +216,11 @@ impl Coroutine {
     }
 
     /// The inner workings of `spawn` and `spawn_catch_panic`.
-    fn spawn_inner<R, Task>(&self, task: Task, propagate_panic: bool)
-        -> Result<CoroutineResult<R>, StackError>
+    fn spawn_inner<R, Task>(
+        &self,
+        task: Task,
+        propagate_panic: bool,
+    ) -> Result<CoroutineResult<R>, StackError>
     where
         R: 'static,
         Task: FnOnce() -> R + UnwindSafe + 'static,
@@ -245,7 +248,7 @@ impl Coroutine {
                     } else {
                         TaskResult::Panicked(panic)
                     }
-                },
+                }
             };
             // We are not interested in errors. They just mean the receiver is no longer
             // interested, which is fine by us.
@@ -382,7 +385,9 @@ impl Coroutine {
         // switching the contexts (it is true when we switch to this coroutine, but not after we
         // leave it, so the future's implementation must not touch the things afterwards.
         let my_context = CONTEXTS.with(|c| {
-            c.borrow_mut().pop().expect("Can't wait outside of a coroutine")
+            c.borrow_mut()
+                .pop()
+                .expect("Can't wait outside of a coroutine")
         });
         let mut result: Option<Result<I, E>> = None;
         let (reply_instruction, context) = {
@@ -504,9 +509,9 @@ impl Coroutine {
         Task: FnOnce() -> R + 'static,
     {
         self.set_thread_local()?;
-        let result = ::tokio::runtime::current_thread::block_on_all(::futures::future::lazy(|| {
-            spawn(task)
-        })).expect("Lost a coroutine when waiting for all of them");
+        let result =
+            ::tokio::runtime::current_thread::block_on_all(::futures::future::lazy(|| spawn(task)))
+                .expect("Lost a coroutine when waiting for all of them");
         Ok(result)
     }
 }
@@ -528,14 +533,15 @@ where
     R: 'static,
     Task: FnOnce() -> R + 'static,
 {
-    BUILDER.with(|builder| builder.borrow().spawn(task))
+    BUILDER
+        .with(|builder| builder.borrow().spawn(task))
         .expect("Unverified builder in thread local storage")
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::rc::Rc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
 
     use futures::future;
@@ -558,8 +564,10 @@ mod tests {
         builder.stack_size(40960);
         let builder_inner = builder.clone();
 
-        let result = builder.spawn(move || {
-                let result = builder_inner.spawn(move || {
+        let result = builder
+            .spawn(move || {
+                let result = builder_inner
+                    .spawn(move || {
                         s2c.store(true, Ordering::Relaxed);
                         42
                     })
@@ -579,10 +587,12 @@ mod tests {
 
     #[test]
     fn coroutine_run() {
-        let result = Coroutine::new().run(|| {
-            Coroutine::wait(future::ok::<(), ()>(())).unwrap().unwrap();
-            42
-        }).unwrap();
+        let result = Coroutine::new()
+            .run(|| {
+                Coroutine::wait(future::ok::<(), ()>(())).unwrap().unwrap();
+                42
+            })
+            .unwrap();
         assert_eq!(42, result);
     }
 
@@ -610,22 +620,26 @@ mod tests {
     fn panics_catch() {
         let mut rt = Runtime::new().unwrap();
         let catch_panic = future::lazy(|| {
-            Coroutine::new().spawn_catch_panic(|| panic!("Test")).unwrap()
+            Coroutine::new()
+                .spawn_catch_panic(|| panic!("Test"))
+                .unwrap()
         });
         match rt.block_on(catch_panic) {
             Err(TaskFailed::Panicked(_)) => (),
             _ => panic!("Panic not reported properly"),
         }
-        assert_eq!(42, rt.block_on(future::lazy(|| Coroutine::with_defaults(|| 42))).unwrap());
+        assert_eq!(
+            42,
+            rt.block_on(future::lazy(|| Coroutine::with_defaults(|| 42)))
+                .unwrap()
+        );
     }
 
     /// However, normal coroutines do panic.
     #[test]
     #[should_panic]
     fn panics_spawn() {
-        let _ = Coroutine::new().run(|| {
-            spawn(|| panic!("Test"))
-        });
+        let _ = Coroutine::new().run(|| spawn(|| panic!("Test")));
     }
 
     /// This one panics and the panic is propagated, but after suspension point it is out of run.
@@ -638,7 +652,8 @@ mod tests {
                     panic!("Test");
                 })
             }))
-        }).unwrap_err();
+        })
+        .unwrap_err();
     }
 
     /// It's impossible to wait on a future outside of a coroutine
@@ -652,16 +667,19 @@ mod tests {
     /// hard.
     #[test]
     fn panic_leak() {
-        panic::catch_unwind(|| current_thread::block_on_all(future::lazy(|| -> Result<(), ()> {
-            let _coroutine = Coroutine::new()
-                .cleanup_strategy(CleanupStrategy::LeakOnPanic)
-                .spawn(|| {
-                    let _ = Coroutine::wait(future::empty::<(), ()>());
-                    panic!("Should never get here!");
-                })
-                .unwrap();
-            panic!("Test");
-        }))).unwrap_err();
+        panic::catch_unwind(|| {
+            current_thread::block_on_all(future::lazy(|| -> Result<(), ()> {
+                let _coroutine = Coroutine::new()
+                    .cleanup_strategy(CleanupStrategy::LeakOnPanic)
+                    .spawn(|| {
+                        let _ = Coroutine::wait(future::empty::<(), ()>());
+                        panic!("Should never get here!");
+                    })
+                    .unwrap();
+                panic!("Test");
+            }))
+        })
+        .unwrap_err();
         /*
          * FIXME: This doesn't work as intended. The sender gets leaked too, so it is never closed
          * and we don't get the Lost case. Any way to make sure we get it?
@@ -720,6 +738,7 @@ mod tests {
                     panic!("A panic should fall out of wait");
                 }
             })
-        })).unwrap();
+        }))
+        .unwrap();
     }
 }

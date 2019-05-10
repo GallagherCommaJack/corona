@@ -3,11 +3,11 @@
 use std::io::{BufRead, BufReader, Write};
 use std::net::SocketAddr;
 
-use corona::prelude::*;
 use corona::io::BlockingWrapper;
-use tokio::runtime::current_thread::Runtime;
+use corona::prelude::*;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::prelude::*;
+use tokio::runtime::current_thread::Runtime;
 
 fn server() -> SocketAddr {
     let listener = TcpListener::bind(&"127.0.0.1:0".parse().unwrap()).unwrap();
@@ -31,9 +31,7 @@ fn server() -> SocketAddr {
 }
 
 fn client(addr: &SocketAddr) {
-    let connection = TcpStream::connect(addr)
-        .coro_wait()
-        .unwrap();
+    let connection = TcpStream::connect(addr).coro_wait().unwrap();
     let mut connection = BlockingWrapper::new(connection);
     connection.write_all(b"hello\n").unwrap();
     let mut answer = String::new();
@@ -54,5 +52,6 @@ fn line_req_resp() {
         Coroutine::with_defaults(move || {
             client(&addr);
         })
-    })).unwrap();
+    }))
+    .unwrap();
 }

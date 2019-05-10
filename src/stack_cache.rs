@@ -20,9 +20,7 @@ pub(crate) fn get(size: usize) -> Result<ProtectedFixedSizeStack, StackError> {
         let mut cell = c.borrow_mut();
         cell.get_mut(&size)
             .and_then(|v| v.pop().map(Ok))
-            .unwrap_or_else(|| {
-                ProtectedFixedSizeStack::new(size)
-            })
+            .unwrap_or_else(|| ProtectedFixedSizeStack::new(size))
     })
 }
 
@@ -32,5 +30,10 @@ pub(crate) fn get(size: usize) -> Result<ProtectedFixedSizeStack, StackError> {
 /// [`get`](function.get.html) call.
 pub(crate) fn put(stack: ProtectedFixedSizeStack) {
     let len = stack.len();
-    CACHE.with(|c| c.borrow_mut().entry(len).or_insert_with(Vec::new).push(stack));
+    CACHE.with(|c| {
+        c.borrow_mut()
+            .entry(len)
+            .or_insert_with(Vec::new)
+            .push(stack)
+    });
 }

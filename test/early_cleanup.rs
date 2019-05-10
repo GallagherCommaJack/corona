@@ -48,7 +48,8 @@ fn cleanup_panic() {
         let status = status.clone();
         finished = Some(Coroutine::with_defaults(move || coroutine_panic(&status)));
         future::ok::<(), ()>(())
-    })).unwrap();
+    }))
+    .unwrap();
     status.before_drop();
     drop(rt);
     status.after_drop(true);
@@ -74,7 +75,8 @@ fn cleanup_nopanic() {
         let status = status.clone();
         finished = Some(Coroutine::with_defaults(move || coroutine_nopanic(&status)));
         future::ok::<(), ()>(())
-    })).unwrap();
+    }))
+    .unwrap();
     status.before_drop();
     // The coroutine finishes once we drop the runtime. Note that it finishes successfully, not
     // panicking.
@@ -93,7 +95,8 @@ fn cleanup_main_panic() {
         let status = status.clone();
         finished = Some(Coroutine::with_defaults(move || coroutine_nopanic(&status)));
         future::ok::<(), ()>(())
-    })).unwrap();
+    }))
+    .unwrap();
     status.before_drop();
     panic_rt(rt);
     status.after_drop(false);
@@ -104,12 +107,12 @@ fn cleanup_main_panic() {
 /// dropping things.
 fn panic_rt(rt: Runtime) {
     panic::catch_unwind(AssertUnwindSafe(|| {
-            // Steal the rt into the closure
-            let _rt = rt;
-            // And panic here, so the rt gets destroyed during an unwind
-            panic!();
-        }))
-        .unwrap_err();
+        // Steal the rt into the closure
+        let _rt = rt;
+        // And panic here, so the rt gets destroyed during an unwind
+        panic!();
+    }))
+    .unwrap_err();
 }
 
 /// Just a testing stream.
@@ -136,7 +139,8 @@ fn stream_cleanup() {
             unreachable!();
         }));
         future::ok::<(), ()>(())
-    })).unwrap();
+    }))
+    .unwrap();
     status.before_drop();
     panic_rt(rt);
     status.after_drop(false);
@@ -162,7 +166,8 @@ fn stream_panic() {
             status.1.set(true);
         }));
         future::ok::<(), ()>(())
-    })).unwrap();
+    }))
+    .unwrap();
     status.before_drop();
     drop(rt);
     status.after_drop(true);

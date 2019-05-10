@@ -1,8 +1,8 @@
 //! Primitives to turn `AsyncRead` and `AsyncWrite` into (coroutine) blocking `Read` and `Write`.
 
-use std::io::{Read, Write, Result as IoResult};
-use tokio_io::{AsyncRead, AsyncWrite};
+use std::io::{Read, Result as IoResult, Write};
 use tokio_io::io;
+use tokio_io::{AsyncRead, AsyncWrite};
 
 use super::prelude::*;
 
@@ -90,8 +90,6 @@ impl<T: AsyncWrite> Write for BlockingWrapper<T> {
             .map(|_| buf.len())
     }
     fn flush(&mut self) -> IoResult<()> {
-        io::flush(&mut self.0)
-            .coro_wait()
-            .map(|_| ())
+        io::flush(&mut self.0).coro_wait().map(|_| ())
     }
 }

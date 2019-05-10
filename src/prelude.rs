@@ -60,7 +60,8 @@ pub trait CoroutineFuture: Future + Sized {
     /// # }
     /// ```
     fn coro_wait(self) -> Result<Self::Item, Self::Error> {
-       self.coro_wait_cleanup().unwrap_or_else(|_| panic::resume_unwind(Box::new(Dropped)))
+        self.coro_wait_cleanup()
+            .unwrap_or_else(|_| panic::resume_unwind(Box::new(Dropped)))
     }
 
     /// A coroutine aware wait on the result that doesn't panic.
@@ -345,9 +346,10 @@ pub trait CoroutineSink: Sink + Sized {
     /// # Panics
     ///
     /// If it is called outside of a coroutine or if the sink itself panics.
-    fn coro_send_cleanup(&mut self, item: Self::SinkItem)
-        -> Result<Result<(), Self::SinkError>, Dropped>
-    {
+    fn coro_send_cleanup(
+        &mut self,
+        item: Self::SinkItem,
+    ) -> Result<Result<(), Self::SinkError>, Dropped> {
         self.coro_sender(iter::once(item)).coro_wait_cleanup()
     }
 
@@ -366,7 +368,7 @@ pub trait CoroutineSink: Sink + Sized {
     /// If it is called outside of a coroutine or if the sink panics internally.
     fn coro_send_many<I>(&mut self, iter: I) -> Result<Result<(), Self::SinkError>, Dropped>
     where
-        I: IntoIterator<Item = Self::SinkItem>
+        I: IntoIterator<Item = Self::SinkItem>,
     {
         self.coro_sender(iter).coro_wait_cleanup()
     }
@@ -390,7 +392,7 @@ pub trait CoroutineSink: Sink + Sized {
 impl<S: Sink> CoroutineSink for S {
     fn coro_sender<Src>(&mut self, iter: Src) -> SinkSender<Self::SinkItem, Self, Src::IntoIter>
     where
-        Src: IntoIterator<Item = Self::SinkItem>
+        Src: IntoIterator<Item = Self::SinkItem>,
     {
         SinkSender::new(self, iter)
     }

@@ -8,9 +8,9 @@ extern crate tokio;
 use std::io::BufReader;
 
 use corona::prelude::*;
-use tokio::net::{TcpListener, TcpStream};
 use tokio::io as aio;
 use tokio::io::AsyncRead;
+use tokio::net::{TcpListener, TcpStream};
 
 fn handle_connection(connection: TcpStream) {
     let (input, mut output) = connection.split();
@@ -31,17 +31,19 @@ fn handle_connection(connection: TcpStream) {
 }
 
 fn main() {
-    Coroutine::new().run(|| {
-        // Set up of the listening socket
-        let listener = TcpListener::bind(&"[::]:1234".parse().unwrap()).unwrap();
-        for attempt in listener.incoming().iter_result() {
-            match attempt {
-                Ok(connection) => {
-                    println!("Received a connection");
-                    handle_connection(connection);
-                },
-                Err(e) => println!("An error accepting a connection: {}", e),
+    Coroutine::new()
+        .run(|| {
+            // Set up of the listening socket
+            let listener = TcpListener::bind(&"[::]:1234".parse().unwrap()).unwrap();
+            for attempt in listener.incoming().iter_result() {
+                match attempt {
+                    Ok(connection) => {
+                        println!("Received a connection");
+                        handle_connection(connection);
+                    }
+                    Err(e) => println!("An error accepting a connection: {}", e),
+                }
             }
-        }
-    }).unwrap();
+        })
+        .unwrap();
 }

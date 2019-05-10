@@ -5,8 +5,8 @@ use std::panic::{self, AssertUnwindSafe};
 use std::process;
 use std::thread;
 
-use context::{Context, Transfer};
 use context::stack::ProtectedFixedSizeStack;
+use context::{Context, Transfer};
 use futures::{Async, Future, Poll};
 use tokio_current_thread::TaskExecutor;
 
@@ -16,18 +16,25 @@ use stack_cache;
 
 /// A workaround because Box<FnOnce> is currently very unusable in rust :-(.
 pub(crate) trait BoxableTask {
-    fn perform(&mut self, Context, ProtectedFixedSizeStack) ->
-        (Context, ProtectedFixedSizeStack, Option<Box<Any + Send>>);
+    fn perform(
+        &mut self,
+        Context,
+        ProtectedFixedSizeStack,
+    ) -> (Context, ProtectedFixedSizeStack, Option<Box<Any + Send>>);
 }
 
 impl<F> BoxableTask for Option<F>
 where
-    F: FnOnce(Context, ProtectedFixedSizeStack) ->
-        (Context, ProtectedFixedSizeStack, Option<Box<Any + Send>>),
+    F: FnOnce(
+        Context,
+        ProtectedFixedSizeStack,
+    ) -> (Context, ProtectedFixedSizeStack, Option<Box<Any + Send>>),
 {
-    fn perform(&mut self, context: Context, stack: ProtectedFixedSizeStack) ->
-        (Context, ProtectedFixedSizeStack, Option<Box<Any + Send>>)
-    {
+    fn perform(
+        &mut self,
+        context: Context,
+        stack: ProtectedFixedSizeStack,
+    ) -> (Context, ProtectedFixedSizeStack, Option<Box<Any + Send>>) {
         self.take().unwrap()(context, stack)
     }
 }
@@ -51,26 +58,24 @@ impl Future for WaitTask {
         // ‒ so likely everything relevant will be dropped like with any other normal panic.
         match panic::catch_unwind(AssertUnwindSafe(unsafe {
             // The future is still not dangling pointer ‒ we never resumed the stack
-            self.poll
-                .as_mut()
-                .unwrap()
+            self.poll.as_mut().unwrap()
         })) {
             Ok(Ok(Async::NotReady)) => Ok(Async::NotReady),
             Ok(result) => {
                 Switch::Resume {
-                        stack: self.stack.take().unwrap(),
-                    }
-                    .run_child(self.context.take().unwrap());
+                    stack: self.stack.take().unwrap(),
+                }
+                .run_child(self.context.take().unwrap());
                 result
-            },
+            }
             Err(panic) => {
                 Switch::PropagateFuturePanic {
-                        stack: self.stack.take().unwrap(),
-                        panic
-                    }
-                    .run_child(self.context.take().unwrap());
+                    stack: self.stack.take().unwrap(),
+                    panic,
+                }
+                .run_child(self.context.take().unwrap());
                 Err(())
-            },
+            }
         }
     }
 }
@@ -81,26 +86,22 @@ impl Drop for WaitTask {
             // Not terminated yet?
             let perform_cleanup = match (self.cleanup_strategy, thread::panicking()) {
                 (CleanupStrategy::CleanupAlways, _)
-                    | (CleanupStrategy::LeakOnPanic, false)
-                    | (CleanupStrategy::AbortOnPanic, false) => true,
-                (CleanupStrategy::LeakAlways, _)
-                    | (CleanupStrategy::LeakOnPanic, true) => false,
-                (CleanupStrategy::AbortAlways, _)
-                    | (CleanupStrategy::AbortOnPanic, true) => {
-                        process::abort();
-                    }
+                | (CleanupStrategy::LeakOnPanic, false)
+                | (CleanupStrategy::AbortOnPanic, false) => true,
+                (CleanupStrategy::LeakAlways, _) | (CleanupStrategy::LeakOnPanic, true) => false,
+                (CleanupStrategy::AbortAlways, _) | (CleanupStrategy::AbortOnPanic, true) => {
+                    process::abort();
+                }
             };
             if perform_cleanup {
                 Switch::Cleanup {
-                        stack: self.stack.take().expect("Taken stack, but not context?")
-                    }
-                    .run_child(context);
-
+                    stack: self.stack.take().expect("Taken stack, but not context?"),
+                }
+                .run_child(context);
             }
         }
     }
 }
-
 
 /// Execution of a coroutine.
 ///
@@ -113,11 +114,8 @@ fn coroutine_internal(transfer: Transfer) -> (Switch, Context) {
         Switch::StartTask { stack, mut task } => {
             let (ctx, stack, panic) = task.perform(context, stack);
             context = ctx;
-            Switch::Destroy {
-                stack,
-                panic,
-            }
-        },
+            Switch::Destroy { stack, panic }
+        }
         _ => panic!("Invalid switch instruction on coroutine entry"),
     };
     (result, context)
@@ -149,22 +147,16 @@ pub(crate) enum Switch {
         task: BoxedTask,
     },
     /// Wait on a future to finish
-    WaitFuture {
-        task: WaitTask,
-    },
+    WaitFuture { task: WaitTask },
     /// A future panicked, propagate it into the coroutine.
     PropagateFuturePanic {
         stack: ProtectedFixedSizeStack,
         panic: Box<Any + Send>,
     },
     /// Continue operation, the future is resolved.
-    Resume {
-        stack: ProtectedFixedSizeStack,
-    },
+    Resume { stack: ProtectedFixedSizeStack },
     /// Abort the coroutine and clean up the resources.
-    Cleanup {
-        stack: ProtectedFixedSizeStack,
-    },
+    Cleanup { stack: ProtectedFixedSizeStack },
     /// Get rid of the sending coroutine, it terminated.
     Destroy {
         stack: ProtectedFixedSizeStack,
@@ -184,8 +176,8 @@ impl Switch {
         // stack got the control), so the pointer is not dangling. We just extract the data from
         // there right away and leave None on the stack, which doesn't need any special handling
         // during destruction, etc.
-        let optref = unsafe { ptr.as_mut() }
-            .expect("NULL pointer passed through a coroutine switch");
+        let optref =
+            unsafe { ptr.as_mut() }.expect("NULL pointer passed through a coroutine switch");
         optref.take().expect("Switch instruction already extracted")
     }
     /// Switches to a coroutine and back.
