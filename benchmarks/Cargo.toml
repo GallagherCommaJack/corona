@@ -4,21 +4,20 @@ version = "0.1.0"
 authors = ["Michal 'vorner' Vaner <vorner@vorner.cz>"]
 workspace = ".."
 publish = false
+edition = "2018"
 
 [dependencies]
 corona = { path = ".." }
 futures-cpupool = "~0.1"
-futures = "~0.1"
 lazy_static = "~1"
 # may = "0.3"
 net2 = "~0.2"
 num_cpus = "~1"
-tokio = "~0.1"
+tokio = {version = "0.1.15", features = ["async-await-preview"]}
 
 [dev-dependencies]
 corona = { path = ".." }
 futures-cpupool = "~0.1"
-futures = "~0.1"
 lazy_static = "~1"
 # may = "0.3"
 net2 = "~0.2"
