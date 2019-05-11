@@ -28,14 +28,13 @@ extern crate tokio;
 use std::env;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::os::unix::io::{FromRawFd, IntoRawFd};
 use std::sync::mpsc;
 use std::thread;
 
 use corona::io::BlockingWrapper;
 use corona::prelude::*;
 // use futures::prelude::await;
-use futures::prelude::*;
+// use futures::prelude::*;
 use futures::{stream, Future, Stream};
 use futures_cpupool::CpuPool;
 // use may::coroutine;
@@ -258,6 +257,41 @@ fn run_futures_cpupool(listener: TcpListener) {
         });
     current_thread::block_on_all(main).unwrap();
 }
+
+fn run_corona_workstealing(listener: TcpListener) {
+    let coro = Coroutine::new();
+    tokio::run(
+        coro.clone()
+            .spawn(move || {
+                let incoming = TokioTcpListener::from_std(listener, &Handle::default())
+                    .unwrap()
+                    .incoming()
+                    .iter_ok();
+                for mut connection in incoming {
+                    corona::spawn(move || {
+                        let mut buf = [0u8; BUF_SIZE];
+                        for _ in 0..*EXCHANGES {
+                            io::read_exact(&mut connection, &mut buf[..])
+                                .coro_wait()
+                                .unwrap();
+                            io::write_all(&mut connection, &buf[..])
+                                .coro_wait()
+                                .unwrap();
+                        }
+                    });
+                }
+            })
+            .unwrap()
+            .map_err(|_| ()),
+    )
+}
+
+/* don't run this for now since it deadlocks
+#[bench]
+fn corona_workstealing(b: &mut Bencher) {
+    bench(b, 3, run_corona_workstealing)
+}
+*/
 
 #[bench]
 fn corona(b: &mut Bencher) {

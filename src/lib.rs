@@ -216,7 +216,7 @@
 //! # extern crate futures;
 //! # extern crate tokio;
 //! use std::time::Duration;
-//! use futures::unsync::mpsc;
+//! use futures::sync::mpsc;
 //! use corona::prelude::*;
 //! use tokio::clock;
 //! use tokio::prelude::*;
@@ -267,6 +267,7 @@
 
 extern crate context;
 extern crate futures;
+extern crate futures_locks;
 #[cfg(any(test, feature = "convenient-run"))]
 extern crate tokio;
 extern crate tokio_current_thread;

@@ -1,13 +1,14 @@
 //! The [`Coroutine`](struct.Coroutine.html) and related things.
 
 use std::any::Any;
-use std::cell::RefCell;
 use std::panic::{self, AssertUnwindSafe, UnwindSafe};
 
 use context::stack::{ProtectedFixedSizeStack, Stack};
 use context::Context;
-use futures::unsync::oneshot::{self, Receiver};
+use futures::future::*;
+use futures::sync::oneshot::{self, Receiver};
 use futures::{Async, Future, Poll};
+use futures_locks::RwLock;
 
 use errors::{Dropped, StackError, TaskFailed};
 use switch::{Switch, WaitTask};
@@ -101,10 +102,8 @@ struct CoroutineContext {
     cleanup_strategy: CleanupStrategy,
 }
 
-thread_local! {
-    static CONTEXTS: RefCell<Vec<CoroutineContext>> = RefCell::new(Vec::new());
-    static BUILDER: RefCell<Coroutine> = RefCell::new(Coroutine::new());
-}
+static CONTEXTS: RwLock<Vec<CoroutineContext>> = RwLock::new(Vec::new());
+static BUILDER: RwLock<Coroutine> = RwLock::new(Coroutine::new());
 
 /// A builder of coroutines.
 ///
@@ -221,7 +220,7 @@ impl Coroutine {
         &self,
         task: Task,
         propagate_panic: bool,
-    ) -> Result<CoroutineResult<R>, StackError>
+    ) -> Future<Item = CoroutineResult<R>, Error = StackError>
     where
         R: 'static,
         Task: FnOnce() -> R + UnwindSafe + 'static,
@@ -236,7 +235,7 @@ impl Coroutine {
                 stack,
                 cleanup_strategy,
             };
-            CONTEXTS.with(|c| c.borrow_mut().push(my_context));
+            CONTEXTS.with_write(|c| ok(c.push(my_context)));
             let mut panic_result = None;
             let result = match panic::catch_unwind(AssertUnwindSafe(task)) {
                 Ok(res) => TaskResult::Finished(res),
@@ -254,7 +253,7 @@ impl Coroutine {
             // We are not interested in errors. They just mean the receiver is no longer
             // interested, which is fine by us.
             drop(sender.send(result));
-            let my_context = CONTEXTS.with(|c| c.borrow_mut().pop().unwrap());
+            let my_context = CONTEXTS.with_write(|c| ok(c.pop().expect("failed to get context")));
             (my_context.parent_context, my_context.stack, panic_result)
         };
         Switch::run_new_coroutine(self.stack_size, Box::new(Some(perform)))?;
@@ -385,11 +384,8 @@ impl Coroutine {
         // in the `drop` implementation and the future itself to ensure this is true even when
         // switching the contexts (it is true when we switch to this coroutine, but not after we
         // leave it, so the future's implementation must not touch the things afterwards.
-        let my_context = CONTEXTS.with(|c| {
-            c.borrow_mut()
-                .pop()
-                .expect("Can't wait outside of a coroutine")
-        });
+        let my_context =
+            CONTEXTS.with_write(|c| ok(c.pop().expect("Can't wait outside of a coroutine")));
         let mut result: Option<Result<I, E>> = None;
         let (reply_instruction, context) = {
             // Shenanigans to make the closure pretend to be 'static to the compiler.
@@ -429,7 +425,7 @@ impl Coroutine {
             stack,
             cleanup_strategy: my_context.cleanup_strategy,
         };
-        CONTEXTS.with(|c| c.borrow_mut().push(new_context));
+        CONTEXTS.with_write(|c| ok(c.push(new_context)));
         match result {
             Ok(result) => result,
             Err(panic) => panic::resume_unwind(panic),
@@ -457,18 +453,27 @@ impl Coroutine {
     ///
     /// If the verification fails, the original value is preserved. If not called, the thread-local
     /// storage contains a default configuration created by [`Coroutine::new`](#method.new).
-    pub fn set_thread_local(&self) -> Result<(), StackError> {
-        self.verify()?;
-        BUILDER.with(|builder| builder.replace(self.clone()));
-        Ok(())
+    pub fn set_thread_local(&self) -> Box<Future<Item = (), Error = StackError> + Send> {
+        if let Err(e) = self.verify() {
+            Box::new(err(e))
+        } else {
+            let this = self.clone();
+            Box::new(
+                BUILDER
+                    .with_write(|mut builder| ok(*builder = this))
+                    .expect("failed to spawn future"),
+            )
+        }
     }
 
     /// Gets a copy of the builder in thread-local storage.
     ///
     /// This may help if you want to use the same builder as [`spawn`](fn.spawn.html) does, but you
     /// want to do something more fancy, like [`spawn_catch_panic`](#method.spawn_catch_panic).
-    pub fn from_thread_local() -> Self {
-        BUILDER.with(|builder| builder.borrow().clone())
+    pub fn from_thread_local() -> impl Future<Item = Self, Error = tokio::executor::SpawnError> {
+        BUILDER
+            .with_read(|builder| ok(builder.clone()))
+            .expect("failed to read tls")
     }
 
     /// Starts a whole runtime and waits for a main coroutine.
@@ -504,16 +509,18 @@ impl Coroutine {
     /// assert_eq!(42, result);
     /// ```
     #[cfg(feature = "convenient-run")]
-    pub fn run<R, Task>(&self, task: Task) -> Result<R, StackError>
+    pub fn run<R, Task>(&self, task: Task) -> Result<R, TaskFailed>
     where
-        R: 'static,
-        Task: FnOnce() -> R + 'static,
+        R: 'static + Send,
+        Task: FnOnce() -> R + 'static + Send,
     {
-        self.set_thread_local()?;
-        let result =
-            ::tokio::runtime::current_thread::block_on_all(::futures::future::lazy(|| spawn(task)))
-                .expect("Lost a coroutine when waiting for all of them");
-        Ok(result)
+        let set_local = self
+            .set_thread_local()
+            .map_err(|e| TaskFailed::Panicked(Box::new(e)));
+        let task = spawn(task);
+        tokio::runtime::Runtime::new()
+            .unwrap_or_else(|e| panic!("Failed to start runtime, io error:\n{:?}", e))
+            .block_on(set_local.and_then(|_| task))
     }
 }
 
@@ -529,14 +536,16 @@ impl Default for Coroutine {
 /// the coroutine builder in thread local storage (see
 /// [`Coroutine::set_thread_local`](struct.Coroutine.html#method.set_thread_local)). This exists
 /// merely as a convenience.
-pub fn spawn<R, Task>(task: Task) -> CoroutineResult<R>
+pub fn spawn<R, Task>(task: Task) -> impl Future<Item = R, Error = TaskFailed>
 where
-    R: 'static,
-    Task: FnOnce() -> R + 'static,
+    R: 'static + Send,
+    Task: FnOnce() -> R + 'static + Send,
 {
     BUILDER
-        .with(|builder| builder.borrow().spawn(task))
-        .expect("Unverified builder in thread local storage")
+        .with_read(|builder| builder.spawn(task))
+        .expect("Failed to get read access to builder")
+        .map_err(|s| panic!("todo"))
+        .and_then(|f| f)
 }
 
 #[cfg(test)]

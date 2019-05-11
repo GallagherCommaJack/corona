@@ -32,7 +32,7 @@ use corona::io::BlockingWrapper;
 use corona::prelude::*;
 use corona::wrappers::SinkSender;
 use corona::Coroutine;
-use futures::unsync::mpsc::{self, Receiver, Sender};
+use futures::sync::mpsc::{self, Receiver, Sender};
 use futures::{future, Future};
 use tokio::codec::{Encoder, FramedWrite};
 use tokio::io::{AsyncRead, WriteHalf};
