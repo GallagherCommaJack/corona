@@ -206,20 +206,38 @@ fn run_threads(listener: TcpListener) {
     drop(listener); // Just to prevent clippy warning
 }
 
-async fn handle_async(mut stream: TokioTcpStream) {
-    let mut buf = vec![0u8; BUF_SIZE];
-    for _ in 0..*EXCHANGES {
-        stream.read_exact_async(&mut buf).await.unwrap() ;
-        stream.write_all_async(&mut buf).await.unwrap();
-    }
-}
-
 async fn gen_futures_await(listener: TcpListener) {
     let mut incoming = TokioTcpListener::from_std(listener, &Handle::default()).unwrap().incoming();
     while let Some(stream) = incoming.next().await {
-        let perform = handle_async(stream.unwrap());
-        tokio::spawn_async(perform);
+        tokio::spawn_async(async move {
+            let mut stream = stream.unwrap();
+            let mut buf = vec![0u8; BUF_SIZE];
+            for _ in 0..*EXCHANGES {
+                stream.read_exact_async(&mut buf).await.unwrap();
+                stream.write_all_async(&buf).await.unwrap();
+            }
+        });
     }
+}
+
+fn run_futures_iopool(listener: TcpListener) {
+    let perfs = TokioTcpListener::from_std(listener, &Handle::default())
+        .unwrap()
+        .incoming()
+        .map_err(|e: std::io::Error| panic!("{}", e))
+        .map(move |connection| {
+            let buf = vec![0u8; BUF_SIZE];
+            Box::new(stream::iter_ok(0..*EXCHANGES)
+                .fold((connection, buf), |(connection, buf), _i| {
+                    io::read_exact(connection, buf)
+                        .and_then(|(connection, buf)| io::write_all(connection, buf))
+                })
+                .map(|_| ())
+                .map_err(|e: std::io::Error| panic!("{}", e))
+        )});
+    let mut runtime = tokio_io_pool::Runtime::new();
+    let fut = runtime.spawn_all(perfs);
+    runtime.block_on(fut).unwrap_or_else(|e| panic!("{:?}", e))
 }
 
 fn gen_futures(listener: TcpListener) -> impl Future<Item = (), Error = ()> {
@@ -317,10 +335,10 @@ fn corona_blocking_wrapper_cpus(b: &mut Bencher) {
 //     bench(b, *SERVER_THREADS, run_futures);
 // }
 
-#[bench]
-fn futures_cpus(b: &mut Bencher) {
-    bench(b, *SERVER_THREADS, run_futures);
-}
+// #[bench]
+// fn futures_cpus(b: &mut Bencher) {
+//     bench(b, *SERVER_THREADS, run_futures);
+// }
 
 #[bench]
 fn futures_workstealing(b: &mut Bencher) {
@@ -335,6 +353,11 @@ fn futures_await_workstealing(b: &mut Bencher) {
 #[bench]
 fn futures_cpupool(b: &mut Bencher) {
     bench(b, 1, run_futures_cpupool);
+}
+
+#[bench]
+fn futures_iopool(b: &mut Bencher) {
+    bench(b, 1, run_futures_iopool);
 }
 
 // #[bench]
