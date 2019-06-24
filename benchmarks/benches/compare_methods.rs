@@ -14,15 +14,9 @@
 //!
 //! The `*_many` variants run the listener in multiple independent threads.
 
-extern crate corona;
-extern crate futures_cpupool;
-#[macro_use]
-extern crate lazy_static;
-// extern crate may;
-extern crate net2;
-extern crate num_cpus;
 extern crate test;
-extern crate tokio;
+use test::Bencher;
+// use bencher::*;
 
 use std::env;
 use std::io::{Read, Write};
@@ -32,19 +26,14 @@ use std::thread;
 
 use corona::io::BlockingWrapper;
 use corona::prelude::*;
-// use futures::prelude::await;
-// use futures::prelude::*;
-// use futures::{stream, Future, Stream};
 use futures_cpupool::CpuPool;
-// use may::coroutine;
-// use may::net::TcpListener as MayTcpListener;
+use lazy_static::lazy_static;
 use net2::TcpBuilder;
-use test::Bencher;
 use tokio::io;
-use tokio::net::{TcpListener as TokioTcpListener, TcpStream as TokioTcpStream};
+use tokio::net::TcpListener as TokioTcpListener;
+use tokio::prelude::*;
 use tokio::reactor::Handle;
 use tokio::runtime::current_thread;
-use tokio::prelude::*;
 
 const BUF_SIZE: usize = 512;
 
@@ -63,7 +52,7 @@ lazy_static! {
     ///
     /// This is what the clients aim for. But a client may be deleting or creating the connections
     /// at a time, so this is the upper limit. With multiple clients, this is split between them.
-    static ref PARALLEL: usize = get_var("PARALLEL", 128);
+    static ref PARALLEL: usize = get_var("PARALLEL", 1024);
     /// How many ping-pongs are done over each connection.
     static ref EXCHANGES: usize = get_var("EXCHANGES", 4);
     /// How many batches should happen before starting to measure.
@@ -165,7 +154,6 @@ fn run_corona(listener: TcpListener) {
         .unwrap();
 }
 
-/// Our own corona.
 fn run_corona_wrapper(listener: TcpListener) {
     Coroutine::new()
         .run(move || {
@@ -201,13 +189,16 @@ fn run_threads(listener: TcpListener) {
                     connection.read_exact(&mut buf[..]).unwrap();
                     connection.write_all(&buf[..]).unwrap();
                 }
-            }).unwrap();
+            })
+            .unwrap();
     }
     drop(listener); // Just to prevent clippy warning
 }
 
 async fn gen_futures_await(listener: TcpListener) {
-    let mut incoming = TokioTcpListener::from_std(listener, &Handle::default()).unwrap().incoming();
+    let mut incoming = TokioTcpListener::from_std(listener, &Handle::default())
+        .unwrap()
+        .incoming();
     while let Some(stream) = incoming.next().await {
         tokio::spawn_async(async move {
             let mut stream = stream.unwrap();
@@ -227,14 +218,16 @@ fn run_futures_iopool(listener: TcpListener) {
         .map_err(|e: std::io::Error| panic!("{}", e))
         .map(move |connection| {
             let buf = vec![0u8; BUF_SIZE];
-            Box::new(stream::iter_ok(0..*EXCHANGES)
-                .fold((connection, buf), |(connection, buf), _i| {
-                    io::read_exact(connection, buf)
-                        .and_then(|(connection, buf)| io::write_all(connection, buf))
-                })
-                .map(|_| ())
-                .map_err(|e: std::io::Error| panic!("{}", e))
-        )});
+            Box::new(
+                stream::iter_ok(0..*EXCHANGES)
+                    .fold((connection, buf), |(connection, buf), _i| {
+                        io::read_exact(connection, buf)
+                            .and_then(|(connection, buf)| io::write_all(connection, buf))
+                    })
+                    .map(|_| ())
+                    .map_err(|e: std::io::Error| panic!("{}", e)),
+            )
+        });
     let mut runtime = tokio_io_pool::Runtime::new();
     let fut = runtime.spawn_all(perfs);
     runtime.block_on(fut).unwrap_or_else(|e| panic!("{:?}", e))
@@ -270,9 +263,6 @@ fn run_futures_await_workstealing(listener: TcpListener) {
     tokio::run_async(gen_futures_await(listener))
 }
 
-/// Just plain futures.
-///
-/// While faster than corona, it is probably harder to read and write.
 fn run_futures_cpupool(listener: TcpListener) {
     let main = TokioTcpListener::from_std(listener, &Handle::default())
         .unwrap()
@@ -295,59 +285,39 @@ fn run_futures_cpupool(listener: TcpListener) {
     current_thread::block_on_all(main).unwrap();
 }
 
-// #[bench]
-// fn corona(b: &mut Bencher) {
-//     bench(b, 1, run_corona);
-// }
-
-// #[bench]
-// fn corona_many(b: &mut Bencher) {
-//     bench(b, *SERVER_THREADS, run_corona);
-// }
-
-// #[bench]
-// fn corona_cpus(b: &mut Bencher) {
-//     bench(b, num_cpus::get(), run_corona);
-// }
-
-// #[bench]
-// fn corona_blocking_wrapper(b: &mut Bencher) {
-//     bench(b, 1, run_corona_wrapper);
-// }
-
-// #[bench]
-// fn corona_blocking_wrapper_many(b: &mut Bencher) {
-//     bench(b, *SERVER_THREADS, run_corona_wrapper);
-// }
+#[bench]
+fn corona(b: &mut Bencher) {
+    bench(b, 1, run_corona);
+}
 
 #[bench]
-fn corona_blocking_wrapper_cpus(b: &mut Bencher) {
+fn corona_cpus(b: &mut Bencher) {
+    bench(b, num_cpus::get(), run_corona);
+}
+
+#[bench]
+fn corona_many(b: &mut Bencher) {
+    bench(b, *SERVER_THREADS, run_corona);
+}
+
+#[bench]
+fn corona_wrapper(b: &mut Bencher) {
+    bench(b, 1, run_corona_wrapper);
+}
+
+#[bench]
+fn corona_wrapper_cpus(b: &mut Bencher) {
     bench(b, num_cpus::get(), run_corona_wrapper);
 }
 
-// #[bench]
-// fn futures(b: &mut Bencher) {
-//     bench(b, 1, run_futures);
-// }
-
-// #[bench]
-// fn futures_many(b: &mut Bencher) {
-//     bench(b, *SERVER_THREADS, run_futures);
-// }
-
-// #[bench]
-// fn futures_cpus(b: &mut Bencher) {
-//     bench(b, *SERVER_THREADS, run_futures);
-// }
-
 #[bench]
-fn futures_workstealing(b: &mut Bencher) {
-    bench(b, 1, run_futures_workstealing);
+fn corona_wrapper_many(b: &mut Bencher) {
+    bench(b, *SERVER_THREADS, run_corona_wrapper);
 }
 
 #[bench]
-fn futures_await_workstealing(b: &mut Bencher) {
-    bench(b, 1, run_futures_await_workstealing);
+fn futures(b: &mut Bencher) {
+    bench(b, 1, run_futures);
 }
 
 #[bench]
@@ -356,31 +326,31 @@ fn futures_cpupool(b: &mut Bencher) {
 }
 
 #[bench]
+fn futures_cpus(b: &mut Bencher) {
+    bench(b, *SERVER_THREADS, run_futures);
+}
+
+#[bench]
 fn futures_iopool(b: &mut Bencher) {
     bench(b, 1, run_futures_iopool);
 }
 
-// #[bench]
-// fn futures_cpupool_many(b: &mut Bencher) {
-//     bench(b, *SERVER_THREADS, run_futures_cpupool);
-// }
+#[bench]
+fn futures_many(b: &mut Bencher) {
+    bench(b, *SERVER_THREADS, run_futures);
+}
 
-// #[bench]
-// fn futures_cpupool_cpus(b: &mut Bencher) {
-//     bench(b, num_cpus::get(), run_futures_cpupool);
-// }
+#[bench]
+fn futures_workstealing(b: &mut Bencher) {
+    bench(b, 1, run_futures_workstealing);
+}
 
-// #[bench]
-// fn threads(b: &mut Bencher) {
-//     bench(b, 1, run_threads);
-// }
+#[bench]
+fn futures_workstealing_async_await(b: &mut Bencher) {
+    bench(b, 1, run_futures_await_workstealing);
+}
 
-// #[bench]
-// fn threads_many(b: &mut Bencher) {
-//     bench(b, *SERVER_THREADS, run_threads);
-// }
-
-// #[bench]
-// fn threads_cpus(b: &mut Bencher) {
-//     bench(b, num_cpus::get(), run_threads);
-// }
+#[bench]
+fn threads(b: &mut Bencher) {
+    bench(b, 1, run_threads);
+}

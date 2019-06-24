@@ -5,12 +5,8 @@ name = "benchmarks"
 publish = false
 version = "0.1.0"
 workspace = ".."
+
 [dependencies]
-futures-cpupool = "~0.1"
-lazy_static = "~1"
-net2 = "~0.2"
-num_cpus = "~1"
-tokio-io-pool = "*"
 
 [dependencies.corona]
 path = ".."
@@ -25,6 +21,11 @@ lazy_static = "~1"
 net2 = "~0.2"
 num_cpus = "~1"
 tokio = "~0.1"
+tokio-io-pool = "~0.1"
+
+[[bench]]
+name = "compare_methods"
+# harness = false 
 
 [dev-dependencies.corona]
 path = ".."
