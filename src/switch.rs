@@ -103,6 +103,7 @@ impl Drop for WaitTask {
     }
 }
 
+
 /// Execution of a coroutine.
 ///
 /// This holds the extracted logic, so once we leave the coroutine, all locals that may possibly
