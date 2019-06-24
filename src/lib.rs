@@ -265,14 +265,6 @@
 //! That's about it, the rest of the library are just implementation details about what is stored
 //! where and how to pass the information around without breaking any lifetime bounds.
 
-extern crate context;
-extern crate futures;
-#[cfg(any(test, feature = "convenient-run"))]
-extern crate tokio;
-extern crate tokio_current_thread;
-#[cfg(feature = "blocking-wrappers")]
-extern crate tokio_io;
-
 pub mod coroutine;
 pub mod errors;
 #[cfg(feature = "blocking-wrappers")]

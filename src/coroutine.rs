@@ -9,8 +9,8 @@ use context::Context;
 use futures::unsync::oneshot::{self, Receiver};
 use futures::{Async, Future, Poll};
 
-use errors::{Dropped, StackError, TaskFailed};
-use switch::{Switch, WaitTask};
+use crate::errors::{Dropped, StackError, TaskFailed};
+use crate::switch::{Switch, WaitTask};
 
 enum TaskResult<R> {
     Panicked(Box<Any + Send + 'static>),

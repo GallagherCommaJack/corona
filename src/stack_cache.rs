@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use context::stack::ProtectedFixedSizeStack;
 
-use errors::StackError;
+use crate::errors::StackError;
 
 thread_local! {
     static CACHE: RefCell<HashMap<usize, Vec<ProtectedFixedSizeStack>>> =

@@ -15,10 +15,10 @@ use std::panic;
 
 use futures::{Future, Sink, Stream};
 
-use errors::Dropped;
-use wrappers::{CleanupIterator, OkIterator, ResultIterator, SinkSender, StreamExtractor};
+use crate::errors::Dropped;
+use crate::wrappers::{CleanupIterator, OkIterator, ResultIterator, SinkSender, StreamExtractor};
 
-pub use coroutine::Coroutine;
+pub use crate::coroutine::Coroutine;
 
 /// An extension crate for the `Future` trait.
 ///

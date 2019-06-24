@@ -10,8 +10,8 @@ use std::panic;
 
 use futures::{Async, AsyncSink, Future, Poll, Sink, Stream};
 
-use errors::Dropped;
-use prelude::CoroutineFuture;
+use crate::errors::Dropped;
+use crate::prelude::CoroutineFuture;
 
 /// An iterator returned from
 /// [`CoroutineStream::iter_cleanup`](../prelude/trait.CoroutineStream.html#method.iter_cleanup).
@@ -205,7 +205,7 @@ mod tests {
     use tokio::prelude::*;
     use tokio::runtime::current_thread;
 
-    use prelude::*;
+    use crate::prelude::*;
 
     /// Test getting things out of a stream one by one.
     ///

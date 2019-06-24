@@ -10,16 +10,16 @@ use context::{Context, Transfer};
 use futures::{Async, Future, Poll};
 use tokio_current_thread::TaskExecutor;
 
-use coroutine::CleanupStrategy;
-use errors::StackError;
-use stack_cache;
+use crate::coroutine::CleanupStrategy;
+use crate::errors::StackError;
+use crate::stack_cache;
 
 /// A workaround because Box<FnOnce> is currently very unusable in rust :-(.
 pub(crate) trait BoxableTask {
     fn perform(
         &mut self,
-        Context,
-        ProtectedFixedSizeStack,
+        cx: Context,
+        stack: ProtectedFixedSizeStack,
     ) -> (Context, ProtectedFixedSizeStack, Option<Box<Any + Send>>);
 }
 
