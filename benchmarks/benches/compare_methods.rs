@@ -286,11 +286,6 @@ fn run_futures_cpupool(listener: TcpListener) {
 }
 
 #[bench]
-fn corona(b: &mut Bencher) {
-    bench(b, 1, run_corona);
-}
-
-#[bench]
 fn corona_cpus(b: &mut Bencher) {
     bench(b, num_cpus::get(), run_corona);
 }
@@ -301,8 +296,8 @@ fn corona_many(b: &mut Bencher) {
 }
 
 #[bench]
-fn corona_wrapper(b: &mut Bencher) {
-    bench(b, 1, run_corona_wrapper);
+fn corona_single_thread(b: &mut Bencher) {
+    bench(b, 1, run_corona);
 }
 
 #[bench]
@@ -316,9 +311,10 @@ fn corona_wrapper_many(b: &mut Bencher) {
 }
 
 #[bench]
-fn futures(b: &mut Bencher) {
-    bench(b, 1, run_futures);
+fn corona_wrapper_single_thread(b: &mut Bencher) {
+    bench(b, 1, run_corona_wrapper);
 }
+
 
 #[bench]
 fn futures_cpupool(b: &mut Bencher) {
@@ -327,7 +323,7 @@ fn futures_cpupool(b: &mut Bencher) {
 
 #[bench]
 fn futures_cpus(b: &mut Bencher) {
-    bench(b, *SERVER_THREADS, run_futures);
+    bench(b, num_cpus::get(), run_futures);
 }
 
 #[bench]
@@ -338,6 +334,11 @@ fn futures_iopool(b: &mut Bencher) {
 #[bench]
 fn futures_many(b: &mut Bencher) {
     bench(b, *SERVER_THREADS, run_futures);
+}
+
+#[bench]
+fn futures_single_thread(b: &mut Bencher) {
+    bench(b, 1, run_futures);
 }
 
 #[bench]
