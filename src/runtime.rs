@@ -16,7 +16,6 @@ type SendableTask = Box<FnOnce() -> Box<Any + Send + 'static> + Send + 'static>;
 
 type SendableReq = (oneshot::Sender<Box<Any + Send + 'static>>, SendableTask);
 
-#[derive(Clone)]
 pub struct RoundRobin {
     current: AtomicUsize,
     senders: Vec<Sender<SendableReq>>,
