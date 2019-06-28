@@ -31,6 +31,9 @@ futures = "~0.1"
 tokio = { version = "~0.1", optional = true }
 tokio-current-thread = "~0.1"
 tokio-io = { version = "~0.1", optional = true }
+tokio-io-pool = "~0.1"
+num_cpus = "*"
+parking_lot = "*"
 
 [[test]]
 name = "integration_tests"

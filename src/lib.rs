@@ -1,5 +1,6 @@
 #![doc(html_root_url = "https://docs.rs/corona/0.4.2/corona/")]
 #![warn(missing_docs)]
+#![allow(warnings)]
 
 //! A library combining futures and coroutines.
 //!
@@ -270,6 +271,7 @@ pub mod errors;
 #[cfg(feature = "blocking-wrappers")]
 pub mod io;
 pub mod prelude;
+pub mod runtime;
 pub mod wrappers;
 
 mod stack_cache;
